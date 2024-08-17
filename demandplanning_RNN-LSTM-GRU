@@ -1,0 +1,148 @@
+# -*- coding: utf-8 -*-
+"""
+@author: 'ABC'
+"""
+
+import numpy
+import pandas as pd
+import matplotlib.pyplot as plt
+from pandas import read_csv, read_excel, get_dummies
+import math
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import SimpleRNN, LSTM, GRU
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import numpy as np
+from kerastuner.tuners import RandomSearch, Hyperband, BayesianOptimization
+from kerastuner import HyperModel
+import keras_tuner as kt
+from tensorflow import keras
+import tensorflow as tf
+from keras.models import load_model
+
+# convert an array of values into a dataset matrix
+def create_dataset(dataset, look_back):
+	dataX, dataY = [], []
+	for i in range(len(dataset)-look_back-1):
+		a = dataset[i:(i+look_back), 0]
+		dataX.append(a)
+		dataY.append(dataset[i + look_back, 0])
+	return numpy.array(dataX), numpy.array(dataY)
+
+
+datasetTable = 'BUT' #Excel sheet name
+
+data = pd.read_excel(r'F:\....\book.xlsx',sheet_name = datasetTable)
+df = data[["date","targetColumn"]]
+dataframe = df.set_index('date')
+
+dataset = dataframe.values
+dataset1 = dataset
+
+scaler = MinMaxScaler(feature_range=(0, 1))
+dataset = scaler.fit_transform(dataset)
+
+X, y = create_dataset(dataset, 2) 
+train_size = int(len(X) * 0.75)
+test_size = len(X) - train_size
+trainX, testX = X[0:train_size,:], X[train_size:len(X),:]
+trainY, testY = y[0:train_size,], y[train_size:len(y),]
+ 
+trainX = numpy.reshape(trainX, (trainX.shape[0], 1, trainX.shape[1]))
+testX = numpy.reshape(testX, (testX.shape[0], 1, testX.shape[1]))
+testY = scaler.inverse_transform([testY])
+testY = testY.reshape(len(testY[0]),1)
+
+def mape(actual, pred): 
+    actual, pred = np.array(actual), np.array(pred)
+    absolute=[]
+    for i,j in zip(actual,pred):
+        av=abs((i-j)/i)
+        absolute.append(av)
+    return np.mean(absolute)
+
+################ LOOKBACK SEARCH ###############################################
+
+results = [[],[],[],[],[],[],[]]
+
+for a in range(1,21,1):
+    print(a)
+    look_back = a
+    X, y = create_dataset(dataset, look_back)
+    # split into train and test sets
+    train_size = int(len(X) * 0.90)
+    test_size = len(X) - train_size
+    trainX, testX = X[0:train_size,:], X[train_size:len(X),:]
+    trainY, testY = y[0:train_size,], y[train_size:len(y),]
+    
+    trainX = numpy.reshape(trainX, (trainX.shape[0], 1, trainX.shape[1]))
+    testX = numpy.reshape(testX, (testX.shape[0], 1, testX.shape[1]))
+
+    k_init = keras.initializers.Constant(value=0.1)
+    b_init = keras.initializers.Constant(value=0)
+    r_init = keras.initializers.Constant(value=0.1)
+    
+    
+    # create and fit the RNN, LSTM or GRU network
+    model = Sequential()
+    model.add(SimpleRNN(units=2, input_shape=(1, look_back), kernel_initializer = k_init, bias_initializer = b_init, recurrent_initializer = r_init))
+    model.add(Dense(1)) # activation default olarak linear
+    model.compile(loss='mse', optimizer='adam') # The learning rate. Defaults to 0.001
+    model.fit(trainX, trainY, epochs=1000, verbose=1)
+    model_predict = model.predict(testX)
+    model_predict = scaler.inverse_transform(model_predict)
+    
+    testY = scaler.inverse_transform([testY])
+    testY = testY.reshape(len(testY[0]),1)
+    
+    def mape(actual, pred): 
+        actual, pred = np.array(actual), np.array(pred)
+        absolute=[]
+        for i,j in zip(actual,pred):
+            av=abs((i-j)/i)
+            absolute.append(av)
+        return np.mean(absolute)
+    
+    mse = mean_squared_error(testY , model_predict)
+    rmse = math.sqrt(mse)
+    mae = mean_absolute_error(testY , model_predict)
+    rkare = r2_score(testY , model_predict)
+    mape = mape(testY, model_predict)
+    
+    results[0].append(model)
+    results[1].append(look_back)
+    results[2].append(rmse)
+    results[3].append(mse)
+    results[4].append(mae)
+    results[5].append(rkare)
+    results[6].append(mape)
+
+
+results_df = {'models': results[0],
+              'lookback': results[1],
+              'rmse': results[2],
+              'mse': results[3],
+              'mae': results[4],
+              'r2': results[5],
+              'mape': results[6]}
+
+results_pd=pd.DataFrame(results_df)
+
+results1 = results_pd.drop('models',axis=1).copy()
+
+modelxxx = load_model(r'F:\.....\model.h5')
+
+modelxxx.summary()
+
+model_predict = modelxxx.predict(testX)
+model_predict = scaler.inverse_transform(model_predict)
+
+mape(testY, model_predict)
+
+#yTrue = testY.values
+plt.plot(testY, label='True')
+plt.plot(model_predict, label='Predict' ,color='red')
+plt.legend()
+plt.title("graphic name")
+plt.show()
