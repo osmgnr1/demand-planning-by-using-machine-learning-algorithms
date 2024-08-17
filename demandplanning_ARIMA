@@ -1,0 +1,172 @@
+# -*- coding: utf-8 -*-
+"""
+
+@author: 'ABC'
+"""
+
+import warnings
+from math import sqrt
+import pandas as pd
+import numpy as np
+from pandas import read_csv
+from pandas import datetime
+from statsmodels.tsa.arima.model import ARIMA, ARIMAResults
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from statsmodels.tsa.stattools import adfuller
+from keras.models import load_model
+
+
+def test_stationarity(timeseries, window = 12, cutoff = 0.05):
+
+    #Determing rolling statistics
+    rolmean = timeseries.rolling(window).mean()
+    rolstd = timeseries.rolling(window).std()
+
+    #Plot rolling statistics:
+    fig = plt.figure(figsize=(12, 8))
+    orig = plt.plot(timeseries, color='blue',label='Original')
+    mean = plt.plot(rolmean, color='red', label='Rolling Mean')
+    std = plt.plot(rolstd, color='black', label = 'Rolling Std')
+    plt.xlabel('Time Series')
+    plt.ylabel('Values')
+    plt.legend(loc='best')
+    plt.title('Rolling Mean & Standard Deviation')
+    plt.show()
+    
+    #Perform Dickey-Fuller test:
+    print('Results of Dickey-Fuller Test:')
+    dftest = adfuller(timeseries, autolag='AIC')
+    dfoutput = pd.Series(dftest[0:4], index=['Test Statistic','p-value','#Lags Used','Number of Observations Used'])
+    for key,value in dftest[4].items():
+        dfoutput['Critical Value (%s)'%key] = value
+    pvalue = dftest[1]
+    if pvalue < cutoff:
+        print('p-value = %.4f. The series is likely stationary.' % pvalue)
+    else:
+        print('p-value = %.4f. The series is likely non-stationary.' % pvalue)
+    
+    print(dfoutput)
+
+
+test_stationarity()
+
+
+perfCri_list=[[],[],[],[],[],[],[],[],[],[]]
+pvalue_control = [[],[]]
+TrainX = pd.Series()
+TestX= pd.Series()
+
+
+def evaluate_arima_model(X, arima_order):
+    # prepare training dataset
+    train_size = int(len(X) * 0.75)
+    train, test = X[0:train_size], X[train_size:]
+    history = [x for x in train]
+    # make predictions
+    predictions = list()
+    
+    for t in range(len(test)):
+        model = ARIMA(history, order=arima_order)
+        model_fit = model.fit()
+        yhat = model_fit.forecast()[0]
+        predictions.append(yhat)
+        history.append(test[t])
+    # calculate out of sample error
+    rmse = sqrt(mean_squared_error(test, predictions))
+    perfCri_list[0].append(arima_order)
+    perfCri_list[1].append(model_fit.aic)
+    perfCri_list[2].append(r2_score(test, predictions))
+    perfCri_list[3].append(mean_squared_error(test, predictions))
+    perfCri_list[4].append(rmse)
+    perfCri_list[5].append(mean_absolute_error(test, predictions))
+    perfCri_list[7].append(train)
+    perfCri_list[8].append(test)
+    perfCri_list[9].append(predictions)
+    
+    model1 = ARIMA(train, order=arima_order)
+    model_fit1 = model1.fit()
+    
+    def mape(actual, pred): 
+        actual, pred = np.array(actual), np.array(pred)
+        absolute=[]
+        for i,j in zip(actual,pred):
+            av=abs((i-j)/i)
+            absolute.append(av)
+        return np.mean(absolute)
+
+    perfCri_list[6].append(mape(test, predictions))
+    
+    model_fit1_p_values = model_fit1.pvalues
+    
+    pvalue_control[0].append(arima_order)
+    pvalue_control[1].append(model_fit1_p_values)
+ 
+    return rmse
+
+
+# evaluate combinations of p, d and q values for an ARIMA model
+def evaluate_models(dataset, p_values, d_values, q_values):
+    dataset = dataset.astype('float32')
+    best_score, best_cfg = float("inf"), None
+    for p in p_values:
+        for d in d_values:
+            for q in q_values:
+                order = (p,d,q)
+                try:
+                    rmse = evaluate_arima_model(dataset, order)
+                    if rmse < best_score:
+                        best_score, best_cfg = rmse, order
+                    print('ARIMA%s RMSE=%.3f' % (order,rmse))
+                except:
+                    continue
+    print('Best ARIMA%s RMSE=%.3f' % (best_cfg, best_score))
+ 
+
+datasetTable = "xxx"
+
+data = pd.read_excel(r'F:\....\book.xlsx',sheet_name = datasetTable)
+dataFoodConsuming = data['targetColumn']
+
+test_stationarity(dataFoodConsuming)
+
+p_values = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+d_values = [1] # range(0, 3)
+q_values = [0,1,2,3,4,5,6,7,8,9,10]
+
+warnings.filterwarnings("ignore")
+evaluate_models(dataYemekTuketim.values, p_values, d_values, q_values)
+
+perfCri_list_df = {'pdq': perfCri_list[0], 
+                   'AIC': perfCri_list[1], 
+                   'r2': perfCri_list[2],
+                   'MSE': perfCri_list[3],
+                   'RMSE': perfCri_list[4],
+                   'MAE': perfCri_list[5],
+                   'MAPE': perfCri_list[6]}
+
+pvalue_control_df = {'pdq': pvalue_control[0],
+                     'P_values': pvalue_control[1]}
+
+only_pvalue_pd = pd.DataFrame(pvalue_control[1])
+pvalue_control_pd = pd.DataFrame(pvalue_control_df)
+perfCri_list_pd = pd.DataFrame(perfCri_list_df)
+
+perfCri_list_pd.to_excel("ARIMA_" + datasetTable + "_perfCri_list_pd.xlsx")
+pvalue_control_pd.to_excel("ARIMA_" + datasetTable + "_pvalue_control_pd.xlsx")
+only_pvalue_pd.to_excel("ARIMA_" + datasetTable + "_only_pvalues.xlsx")
+
+pvalue_control[1].to_excel(datasetTable + "only_pvalues.xlsx")
+
+
+testY= perfCri_list[8][0]
+model_predict = my_array = np.array(perfCri_list[9][0])
+
+#yTrue = testY.values
+plt.plot(testY, label='True')
+plt.plot(model_predict, label='Predict' ,color='red')
+plt.legend()
+plt.title("graphic name")
+plt.show()
