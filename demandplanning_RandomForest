@@ -1,0 +1,124 @@
+# -*- coding: utf-8 -*-
+"""
+@author: xxxx
+"""
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score,mean_squared_error, mean_absolute_error
+from six import StringIO  
+from IPython.display import Image  
+from sklearn.tree import export_graphviz
+# import pydotplus
+import os
+from pandas import datetime
+from sklearn import preprocessing
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
+from matplotlib import pyplot
+import seaborn as sns
+import math
+import pickle
+from keras.models import load_model
+
+
+dataset = "ABC" #Excel sheet name
+
+data = pd.read_excel(r'C:\...\book.xlsx',sheet_name = dataset)
+data = data.set_index('Tarih')
+
+data_encoded = pd.get_dummies(data, columns=['A','B', ...])
+
+
+y = data_encoded['TargetColumn'].copy()
+X = data_encoded.drop('TargetColumn',axis=1).copy() 
+
+
+
+################ X ve y MinMax Normalization ########
+
+min_max_scaler_X = MinMaxScaler(feature_range=(0, 1))
+min_max_scaler_y = MinMaxScaler(feature_range=(0, 1))
+X_values = X.values
+y_values = y.values.reshape(len(y),1)
+X_Norm = min_max_scaler_X.fit_transform(X_values)
+y_Norm = min_max_scaler_y.fit_transform(y_values)
+y_Norm = y_Norm.reshape(len(y_Norm),)
+
+#####################################################
+
+trees = [int(x) for x in np.linspace(start = 1000 , stop = 10000, num = 19)] 
+perfCri_list=[[],[],[],[],[],[]]
+perfCri_list[0]= trees
+
+trainTest_list = [[],[],[],[],[],[],[],[]]
+trainTest_list[0]= trees
+
+for tree in trees: 
+    
+    def mape(actual, pred): 
+        actual, pred = np.array(actual), np.array(pred)
+        absolute=[]
+        for i,j in zip(actual,pred):
+            av=abs((i-j)/i)
+            absolute.append(av)
+        return np.mean(absolute)
+    
+    Xtrain, Xtest, ytrain, ytest = train_test_split(X_Norm,y_Norm,test_size=0.25, shuffle=True)
+    ytest_rev = ytest.reshape(len(ytest),1)
+    ytest_rev2 = min_max_scaler_y.inverse_transform(ytest_rev)
+    ytest_rev2 = ytest_rev2.reshape(len(ytest_rev2),)
+    
+    regr = RandomForestRegressor(random_state = 42, 
+                             bootstrap = True, 
+                             oob_score=True,
+                             max_depth=None,
+                             max_features='auto',
+                             n_estimators=tree,
+                             n_jobs=-1)
+    regr.fit(Xtrain,ytrain)
+    yPredict=regr.predict(Xtest)
+    yPredict_rev = yPredict.reshape(len(yPredict),1)
+    yPredict_rev = min_max_scaler_y.inverse_transform(yPredict_rev)
+    yPredict_rev2 = np.around(yPredict_rev)
+    yPredict_rev2 = yPredict_rev2.reshape(len(yPredict_rev2),)
+
+    
+    mse = round(mean_squared_error(ytest_rev2, yPredict_rev2), 3)
+    rmse = round(math.sqrt(mse), 3)
+    mae = round(mean_absolute_error(ytest_rev2, yPredict_rev2), 3)
+    r2 = round(r2_score(ytest_rev2, yPredict_rev2), 3)
+    mape = round(mape(ytest_rev2, yPredict_rev2), 3)
+        
+    perfCri_list[1].append(rmse) 
+    perfCri_list[2].append(mse) 
+    perfCri_list[3].append(mae) 
+    perfCri_list[4].append(r2)
+    perfCri_list[5].append(mape)
+    
+    trainTest_list[1].append(Xtrain)
+    trainTest_list[2].append(ytrain)
+    trainTest_list[3].append(Xtest)
+    trainTest_list[4].append(ytest)
+    trainTest_list[5].append(regr)
+    trainTest_list[6].append(ytest_rev2)
+    trainTest_list[7].append(yPredict_rev2)
+    
+perfCri_list_df = {'tree': perfCri_list[0], 
+                   'RMSE': perfCri_list[1], 
+                   'MSE': perfCri_list[2],
+                   'MAE': perfCri_list[3],
+                   'R2': perfCri_list[4],
+                   'MAPE': perfCri_list[5]}
+
+perfCri_list_pd = pd.DataFrame(perfCri_list_df)
+
+actual = trainTest_list[6][0]
+predict = trainTest_list[7][0]
+
+plt.plot(actual, label='True')
+plt.plot(predict, label='Predict' ,color='red')
+plt.legend()
+plt.title("RF-Dataset")
+plt.show()
